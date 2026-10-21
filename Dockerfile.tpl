@@ -59,17 +59,28 @@ RUN set -eux; \
 	docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ && \
 	docker-php-ext-install ldap; \
 	\
-	curl -fL -o imagick.tgz 'https://pecl.php.net/get/imagick-3.8.1.tgz'; \
-	echo '3a3587c0a524c17d0dad9673a160b90cd776e836838474e173b549ed864352ee *imagick.tgz' | sha256sum -c -; \
-	pecl install ./imagick.tgz && \
-	rm imagick.tgz && \
+	# pecl.php.net ne sert plus les archives (504) : imagick et apcu sont construits avec
+	# phpize depuis l'archive de leur tag GitHub. Les *_arginfo.h sont rafraichis pour que
+	# make ne les regenere pas : la regeneration telecharge PHP-Parser sans verification.
+	curl -fL -o imagick.tar.gz 'https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz'; \
+	echo 'b0e9279ddf6e75a8c6b4068e16daec0475427dbca7ce2e144e30a51a88aa5ddc *imagick.tar.gz' | sha256sum -c -; \
+	mkdir imagick; \
+	tar -xzf imagick.tar.gz -C imagick --strip-components=1; \
+	# substitution que pecl applique d'apres package.xml
+	sed -i 's/@PACKAGE_VERSION@/3.8.1/' imagick/php_imagick.h; \
+	( cd imagick && touch *_arginfo.h && phpize && ./configure --with-imagick && make -j"$(nproc)" && make install ); \
+	rm -rf imagick imagick.tar.gz; \
 	docker-php-ext-enable imagick; \
+	test "$(php -r 'echo phpversion("imagick");')" = '3.8.1'; \
 	\
-	curl -fL -o apcu.tgz 'https://pecl.php.net/get/apcu-5.1.28.tgz'; \
-	echo 'ca9c1820810a168786f8048a4c3f8c9e3fd941407ad1553259fb2e30b5f057bf *apcu.tgz' | sha256sum -c -; \
-	pecl install ./apcu.tgz && \
-	rm apcu.tgz && \
+	curl -fL -o apcu.tar.gz 'https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz'; \
+	echo '0e60ba9d0fa4021c57a70c071f3d8f71de236275d084e560d5959fec4edd8c32 *apcu.tar.gz' | sha256sum -c -; \
+	mkdir apcu; \
+	tar -xzf apcu.tar.gz -C apcu --strip-components=1; \
+	( cd apcu && touch *_arginfo.h && phpize && ./configure --enable-apcu && make -j"$(nproc)" && make install ); \
+	rm -rf apcu apcu.tar.gz; \
 	docker-php-ext-enable apcu; \
+	test "$(php -r 'echo phpversion("apcu");')" = '5.1.28'; \
 	out="$(php -r 'exit(0);')"; \
 	[ -z "$out" ]; \
 	err="$(php -r 'exit(0);' 3>&1 1>&2 2>&3)"; \
