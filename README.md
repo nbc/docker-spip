@@ -136,6 +136,49 @@ Can change PHP vars to optimize your installation.
 - `PHP_UPLOAD_MAX_FILESIZE` (default `32M`)
 - `PHP_TIMEZONE` (default: `America/Guadeloupe`)
 
+## Extending the entrypoint
+
+Derived images can run their own steps at startup without replacing `docker-entrypoint.sh`. Put
+`*.sh` files in one of these directories:
+
+- `/docker-entrypoint.d/pre/`: after `php.ini` is written, before SPIP is copied into the volume,
+  the database is waited for and the site installed. Use it for files and variables the next
+  steps should see — plugins to copy, an Apache configuration, `SPIP_ADMIN_NAME`…
+- `/docker-entrypoint.d/post/`: once the database is reachable and SPIP installed, before the
+  ownership model is applied and the passwords are removed from the environment. Use it for
+  `spip` commands: configuration, plugin updates, accounts…
+
+```dockerfile
+FROM ipeos/spip:4.4
+COPY ./hooks/pre/ /docker-entrypoint.d/pre/
+COPY ./hooks/post/ /docker-entrypoint.d/post/
+```
+
+The scripts are **sourced** in alphabetical order, as root, in the entrypoint's shell: variables
+they export are seen by the following steps, they can use the `run_as` and `shquote` helpers to run
+commands as `www-data`, and an error stops the container (the entrypoint runs with
+`set -euo pipefail`). The ownership model applies to the files they create, as to the rest of the
+tree. Files that do not end in `.sh` are ignored.
+
+For instance, plugins shipped in the image (`COPY ./plugins/ /opt/site-plugins/`) are copied into
+the volume in `pre`, so that the database upgrade run when the SPIP version changes takes them into
+account, and the ownership model applies to them:
+
+```bash
+# /docker-entrypoint.d/pre/10-plugins.sh
+mkdir -p plugins-dist/site
+rm -rf plugins-dist/site/*
+cp -r /opt/site-plugins/. plugins-dist/site/
+```
+
+Then `post` updates their tables and applies the site configuration:
+
+```bash
+# /docker-entrypoint.d/post/50-config.sh
+run_as "spip plugins:maj:bdd"
+run_as "spip config:ecrire -f /my-config.json"
+```
+
 ## Build & Release
 
 The `4.4/` directory is **generated**: do not edit it directly. Sources are `Dockerfile.tpl`, `docker-entrypoint.sh` and `spip-hardening.conf` at the repository root.
